@@ -1,52 +1,38 @@
 "use strict";
 
 /* eslint-disable no-unused-vars */
+/* global FID3 */
 var Utils = {
-  readID3Data(audio) {
-    if (audio.type.match("video") == "video") {
-      return Promise.resolve({
-        title: this.removeFileExtension(audio.name)
-      });
-    }
-    /* For more information: https://en.wikipedia.org/wiki/ID3#Layout */
-    var reader = new FileReader();
-    reader.readAsArrayBuffer(audio.slice(audio.size - 128));
-
+  readTags(media) {
     return new Promise(resolve => {
-      reader.onload = (e) => {
-        var result = e.target.result;
-        /* Converting the ArrayBuffer to String */
-        result = String.fromCharCode.apply(null, new Uint8Array(result));
+      if (media.type.match("audio") == "audio") {
+        let reader = new FID3(media)
+          .then(tag => {
+            Promise.all([
+              tag.title != null ? tag.title.read() : -1,
+              tag.artist != null ? tag.artist.read() : -1,
+              tag.album != null ? tag.album.read() : -1,
+              tag.picture != null ? tag.picture.read() : -1,
+            ].filter(e => e != -1)).then(e => {
+              let tags = {
+                title: tag.title && tag.title.value,
+                artist: tag.artist && tag.artist.value,
+                album: tag.album && tag.album.value,
+                pic: tag.picture != null ? window.URL.createObjectURL(tag.picture.value) : null,
+              };
 
-        var tags = {};
-
-        if (result.slice(0, 4) == "TAG+") {
-          // Extended id3v1 tag
-          tags = {
-            title: result.slice(4, 64).trim(),
-            artist: result.slice(64, 124).trim(),
-            album: result.slice(124, 184).trim(),
-            // speed_list: ["unset", "slow", "medium", "fast", "hardcore"],
-            // speed: this.speed_list[parseInt(result.slice(184, 185))],
-            genre: result.slice(185, 215).trim(),
-            // start_time: result.slice(215, 221).trim(),
-            // end_time: result.slice(221, 227).trim()
-          };
-        } else if (result.slice(0, 3) == "TAG") {
-          // Basic id3v1 tag
-          tags = {
-            title: result.slice(3, 3 + 30).trim(),
-            artist: result.slice(30 + 3, 2 * 30 + 3).trim(),
-            album: result.slice(2 * 30 + 3, 3 * 30 + 3).trim(),
-            year: result.slice(3 * 30 + 3, 3 * 30 + 7).trim(),
-            // comment: result.slice(3 * 30 + 7, 4 * 30 + 7).trim()
-          };
-        } else {
-          tags = this.predictTagsFromName(audio.name);
-        }
-        resolve(tags);
-      };
+              resolve(Object.assign(tags, this.predictTagsFromName(media.name)));
+            });
+          });
+      } else {
+        resolve(this.getVideoTags(media));
+      }
     });
+  },
+  getVideoTags(vid) {
+    return {
+      title: vid.name
+    };
   },
   predictTagsFromName(name) {
     if (!name) {
@@ -90,16 +76,9 @@ var Utils = {
   },
 
   sanitizeCommonKeywords(name) {
-    var keywords = ["lyric", "video", "audio", "lyrics", "official"];
-    var removedKeywords = keywords.map(k => "[" + k);
-    removedKeywords = removedKeywords.concat(keywords.map(k => "(" + k));
-    removedKeywords = removedKeywords.concat(keywords.map(k => "[" + k + "]"));
-    removedKeywords = removedKeywords.concat(keywords.map(k => "(" + k + ")"));
-    removedKeywords = removedKeywords.concat(keywords.map(k => k + "]"));
-    removedKeywords = removedKeywords.concat(keywords.map(k => k + ")"));
-
-    name = name.split(" ").filter(w => removedKeywords.indexOf(w.toLowerCase()) === -1);
-    return name.join(" ");
+    var keywordRegex = /[\(\[]([\s\w]+)?(official|music|audio|video|edit|tour|lyric|lyrics)([\s\w]+)?[\)\]]/ig;
+    name = name.replace(/_/g, " ");
+    return name.replace(keywordRegex, "");
   },
 
   getTooltipForTags(tags) {

@@ -2,7 +2,7 @@
 
 var MediaPlayer = {
   init() {
-    this.isElectron = window.process && window.process.type && window.process.versions.electron;
+    this.isElectron = !!(window.process && window.process.type && window.process.versions.electron);
 
     /* Define elements */
     this.videoEl = document.getElementById("MediaPlayer");
@@ -56,7 +56,9 @@ var MediaPlayer = {
       },
     });
 
-    this.settingsStore = new SettingsStore();
+    this.settingsStore = new SettingsStore({
+      isElectron: this.isElectron,
+    });
     this.settingsOverlay = new SettingsOverlay({
       store: this.settingsStore,
       element: document.getElementById("settings-overlay"),
@@ -108,10 +110,16 @@ var MediaPlayer = {
       this.classList.add("dragging");
       MediaPlayer.onProgressClick(e.pageX);
     });
-    this.progressBar.addEventListener("mouseup", (e) => {
+
+    let stopProgressBarDrag = (e) => {
+      if (e.type === "mouseout" && e.target !== document.documentElement) {
+        return;
+      }
       this.progressBar.classList.remove("dragging");
-    });
-    this.progressBar.addEventListener("mouseover", (e) => {
+    };
+    document.documentElement.addEventListener("mouseout", stopProgressBarDrag);
+    window.addEventListener("mouseup", stopProgressBarDrag);
+    window.addEventListener("mousemove", (e) => {
       if (this.progressBar.classList.contains("dragging")) {
         this.onProgressClick(e.pageX);
       }
@@ -177,22 +185,30 @@ var MediaPlayer = {
       this.playPauseEl.classList.add("paused");
     });
     this.videoEl.addEventListener("ended", () => {
-      this.killContext();
-      this.playlist.selectNext();
+      if (this.playlist.loop) {
+        this.killContext();
+        this.playlist.selectNext();
+      }
     });
+
+    this.UIEnabled = false;
+    this.changeLoopState(1);
     this.initAudioContext();
   },
   set UIEnabled(value) {
     if (!value) {
+      document.body.classList.add("controls-disabled");
       this.controlsEl.classList.add("disabled");
       this.headerEl.textContent = "";
       this.headerEl.title = "";
       document.title = "Media Player";
       this.videoEl.hidden = true;
       this.canvasEl.hidden = false;
+      this.videoEl.src = "";
       this.pause(true);
       this.videoEl.currentTime = 0;
     } else {
+      document.body.classList.remove("controls-disabled");
       this.controlsEl.classList.remove("disabled");
     }
   },
@@ -221,20 +237,16 @@ var MediaPlayer = {
   /** Sidebar **/
   uploadFiles(uploadedMedia) {
     uploadedMedia = Array.from(uploadedMedia) || [];
-    this.playlist.element.classList.add("loading");
 
-    uploadedMedia = uploadedMedia.filter(m => m.type.match("audio") == "audio"
-                                           || m.type.match("video") == "video");
-    return this.playlist.addAll(uploadedMedia).then(() => {
-      this.playlist.element.classList.remove("loading");
-    });
+    return this.playlist.addAll(uploadedMedia);
   },
   setMedia(hash) {
     let item = this.playlist.list.get(hash);
     document.querySelector("#display-container")
-            .className = item.type;
+      .className = item.type;
     this.videoEl.hidden = item.type != "video";
     this.canvasEl.hidden = item.type == "video";
+    URL.revokeObjectURL(this.videoEl.src);
     this.videoEl.src = URL.createObjectURL(item.media);
     this.updateHeader(item.tags);
     // Scroll to the selected item
@@ -244,7 +256,7 @@ var MediaPlayer = {
   },
   updateHeader(tags) {
     let artistAndTitle = tags.artist ? tags.artist + " - " + tags.title
-                                     : tags.title;
+      : tags.title;
     this.headerEl.textContent = artistAndTitle;
     document.title = this.headerEl.textContent;
 
@@ -256,9 +268,18 @@ var MediaPlayer = {
     var ctx = new AudioContext();
     var media = this.videoEl;
     var mediaSrc = ctx.createMediaElementSource(media);
+
     var analyser = ctx.createAnalyser();
-    mediaSrc.connect(analyser);
     analyser.connect(ctx.destination);
+
+    this.equalizer = new Equalizer({
+      panel: document.querySelector("#equalizer-panel"),
+      toggle: document.querySelector("#equalizer-btn"),
+      audioCtx: ctx,
+      departureNode: mediaSrc,
+      destinationNode: analyser,
+    });
+
     this.analyser = analyser;
     this.ctx = ctx;
   },
@@ -272,10 +293,13 @@ var MediaPlayer = {
     let element = params.element;
     let onClick = params.onClick;
     let onHold = params.onHold;
+    let holded = false;
     element.addEventListener("mousedown", () => {
+      this.prevOrNextPressed = true;
       this.prevNextTimeout = setTimeout(() => {
         if (this.prevNextTimeout) {
           this.prevNextInterval = setInterval(() => {
+            holded = true;
             onHold();
           }, 500);
         }
@@ -283,17 +307,20 @@ var MediaPlayer = {
     }, 1000);
 
     element.addEventListener("mouseup", () => {
+      if (!this.prevOrNextPressed) {
+        return;
+      }
+      this.prevOrNextPressed = false;
       if (this.prevNextTimeout) {
         clearTimeout(this.prevNextTimeout);
         this.prevNextTimeout = null;
       }
-      console.log(this.prevNextInterval, this.prevNextTimeout);
+      if (!holded) {
+        onClick();
+      }
       if (this.prevNextInterval) {
         clearInterval(this.prevNextInterval);
         this.prevNextInterval = null;
-      } else {
-        onClick();
-        console.log("click");
       }
     });
   },
@@ -352,20 +379,42 @@ var MediaPlayer = {
     }
   },
   toggleShuffle() {
-    this.playlist.shuffle = !this.playlist.shuffle;
+    this.playlist.toggleShuffle();
     if (this.playlist.shuffle) {
       this.shuffleEl.classList.add("checked");
     } else {
       this.shuffleEl.classList.remove("checked");
     }
   },
-  toggleLoop() {
-    if (this.videoEl.loop) {
-      this.videoEl.loop = false;
-      this.loopEl.classList.remove("checked");
+  changeLoopState(state) {
+    if (!state) {
+      this.loopState = this.loopState == 2 ? 0 : this.loopState + 1;
     } else {
-      this.videoEl.loop = true;
-      this.loopEl.classList.add("checked");
+      this.loopState = state;
+    }
+
+    switch (this.loopState) {
+      // No loop
+      case 0:
+        this.playlist.loop = false;
+        this.videoEl.loop = false;
+        this.loopEl.classList.remove("checked", "loop-one");
+        break;
+
+      // Loop playlist (default)
+      case 1:
+        this.playlist.loop = true;
+        this.videoEl.loop = false;
+        this.loopEl.classList.remove("loop-one");
+        this.loopEl.classList.add("checked");
+        break;
+
+      // Loop one song
+      case 2:
+        this.playlist.loop = false;
+        this.videoEl.loop = true;
+        this.loopEl.classList.add("checked", "loop-one");
+        break;
     }
   },
   toggleSpeedBtn() {
@@ -381,7 +430,7 @@ var MediaPlayer = {
     if (volume == this.videoEl.volume) {
       return;
     }
-    this.videoEl.volume = volume;
+    this.videoEl.volume = volume * volume;
     if (volume == 0) {
       this.volumeIcon.className = "mute";
     } else if (volume <= 0.5) {
@@ -390,7 +439,7 @@ var MediaPlayer = {
       this.volumeIcon.className = "";
     }
     this.volumeSlider.value = volume;
-    this.volumeSlider.title = this.volumeIcon.title = Math.round(volume * 100) + "%";
+    this.volumeSlider.title = this.volumeIcon.title = Math.round(volume * volume * 1000) / 10 + "%";
     if (this.settingsStore) {
       this.settingsStore.setItem("volume", volume);
     }
@@ -483,14 +532,14 @@ var MediaPlayer = {
         ctx.fillStyle = capStyle;
         if (value < capYPositionArray[i]) {
           ctx.fillRect(i * totalWidth,
-                       cheight - (--capYPositionArray[i]),
-                       meterWidth, capHeight);
+            cheight - (--capYPositionArray[i]),
+            meterWidth, capHeight);
         } else {
           ctx.fillRect(i * totalWidth, cheight - value, meterWidth, capHeight);
           capYPositionArray[i] = value;
         }
         ctx.fillStyle = getComputedStyle(document.documentElement)
-                        .getPropertyValue("--theme-highlight-color");
+          .getPropertyValue("--theme-highlight-color");
         ctx.fillRect(i * totalWidth, cheight - value + capHeight, meterWidth, cheight);
       }
       that.animationId = requestAnimationFrame(drawMeter);

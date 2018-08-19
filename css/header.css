@@ -6,7 +6,6 @@
   top: 0;
   white-space: nowrap;
   z-index: 999;
-  display: flex;
 }
 
 #settings-overlay .header,
@@ -23,6 +22,7 @@
 #header-container {
   transition: font-size 0.5s, opacity 0.2s;
   padding-right: 0 !important;
+  display: flex;
 }
 
 .video #header-container {
@@ -61,7 +61,10 @@
 }
 
 .electron #header:empty::before {
-  content: "Media Player";
+  content: " ";
+  width: 1em;
+  height: 1em;
+  display: inline-block;
 }
 
 .electron .caption-buttons {
@@ -78,17 +81,14 @@
   padding: 0 5px;
 }
 
-.caption-button:hover::before,
-.caption-button:focus::before {
+.caption-button:hover::before {
   background-color: rgba(0,0,0,0.1);
 }
 
-.caption-button.close:hover::before,
-.caption-button.close:focus::before {
+.caption-button.close:hover::before{
   background-color: #15ced9;
 }
 
-.light .caption-button.close:focus::before,
 .light .caption-button.close:hover::before {
   filter: none;
 }

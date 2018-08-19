@@ -1,7 +1,7 @@
 "use strict";
 
 /* eslint no-undef:0 */
-const { app, BrowserWindow, nativeImage } = require("electron");
+const { app, BrowserWindow, nativeImage, ipcMain } = require("electron");
 const path = require("path");
 const url = require("url");
 const fs = require("fs");
@@ -12,12 +12,95 @@ if (setupEvents.handleSquirrelEvent()) {
   return;
 }
 
+// Setup file handlers
+var osxFile;
+app.on("open-file", (event, filePath) => {
+  if (win && win.webContents && !win.webContents.isLoading()) {
+    win.webContents.send("file-found", filePath);
+  } else {
+    osxFile = filePath;
+  }
+});
+
 let win;
 
-let image = nativeImage.createFromPath(path.join(__dirname, "./img/icon.png"));
+let image = createNativeImage("./img/icon.png");
 if (app.dock) {
   app.dock.setIcon(image);
 }
+
+function createNativeImage(relativePath) {
+  return nativeImage.createFromPath(path.join(__dirname, relativePath));
+}
+function setThumbarState(state) {
+  if (!win) {
+    return;
+  }
+
+  if (state == "ended") {
+    win.setThumbarButtons([]);
+    return;
+  }
+
+  let buttons = [];
+  buttons.push({
+    tooltip: "Previous song",
+    icon: path.join(__dirname, "img", "electron", "previous-song.png"),
+    click() {
+      win.webContents.send("request-video-action", "previous-song");
+    },
+  });
+
+  if (state == "play") {
+    buttons.push({
+      tooltip: "Pause",
+      icon: path.join(__dirname, "img", "electron", "pause.png"),
+      click() {
+        win.webContents.send("request-video-action", "pause");
+      }
+    });
+  } else {
+    buttons.push({
+      tooltip: "Play",
+      icon: path.join(__dirname, "img", "electron", "play.png"),
+      click() {
+        win.webContents.send("request-video-action", "play");
+      },
+    });
+  }
+
+  buttons.push({
+    tooltip: "Next song",
+    icon: path.join(__dirname, "img", "electron", "next-song.png"),
+    click() {
+      win.webContents.send("request-video-action", "next-song");
+    },
+  });
+
+  win.setThumbarButtons(buttons);
+}
+
+function onMediaStateChange(event, state) {
+  if (app.dock) {
+    let badge;
+    switch (state) {
+      case "pause":
+        badge = "⏸";
+        break;
+      case "play":
+        badge = "▶";
+        break;
+      case "ended":
+        badge = "";
+        break;
+    }
+    app.dock.setBadge(badge);
+  }
+  if (win.setThumbarButtons) {
+    setThumbarState(state);
+  }
+}
+
 function createWindow() {
   win = new BrowserWindow({
     width: 800,
@@ -32,38 +115,36 @@ function createWindow() {
     titleBarStyle: "hidden-inset"
   });
   win.setMenu(null);
+  // win.toggleDevTools();
   win.loadURL(url.format({
     pathname: path.join(__dirname, "./index.html"),
     protocol: "file:",
     slashes: true,
   }));
 
-  // Setup file handlers
-  var osxFile;
-  app.on("open-file", (event, filePath) => {
-    var data = fs.readFileSync(filePath, null);
-    if (win.webContents.isLoading()) {
-      win.webContents.send("file-found", data, filePath);
-    } else {
-      let fileName = getFileNameFromPath(filePath);
-      osxFile = {data, fileName};
-    }
-  });
   win.webContents.once("did-stop-loading", () => {
-    let fileDesc = fs.lstatSync(process.argv[process.argv.length - 1]);
-    if (process.platform == "win32" && fileDesc.isFile()) {
-      var openFilePath = process.argv[process.argv.length - 1];
-      var data = fs.readFileSync(openFilePath, null);
-      let openFileName = getFileNameFromPath(openFilePath);
-      win.webContents.send("file-found", data, openFileName);
+    if (process.platform == "win32") {
+      let fileDesc = fs.lstatSync(process.argv[process.argv.length - 1]);
+      if (fileDesc.isFile()) {
+        var openedFilePath = process.argv[process.argv.length - 1];
+        win.webContents.send("file-found", openedFilePath);
+      }
     } else if (osxFile) {
-      win.webContents.send("file-found", osxFile.data, osxFile.fileName);
+      win.webContents.send("file-found", osxFile);
     }
+    ipcMain.on("add-recent-file", (_, mediaPath) => app.addRecentDocument(mediaPath));
+    ipcMain.on("media-state-change", onMediaStateChange);
   });
 
   // Close handler
   win.on("closed", () => {
     win = null;
+    ipcMain.removeAllListeners("add-recent-file");
+    ipcMain.removeAllListeners("media-state-change");
+
+    if (app.dock) {
+      app.dock.setBadge("");
+    }
   });
 }
 
@@ -73,10 +154,3 @@ app.on("window-all-closed", () => app.quit());
 
 app.on("activate", () => (win === null) ? createWindow() : 0);
 
-function getFileNameFromPath(filePath) {
-  let fileName = filePath.split("/").pop();
-  if (fileName == filePath) {
-    fileName = filePath.split("\\").pop();
-  }
-  return fileName;
-}

@@ -9,7 +9,9 @@
 function Playlist(params) {
   this.element = params.element;
   this.previousItem = null;
+  this.coverEl = document.querySelector("img#cover");
   this.shuffle = false;
+  this.loop = true;
   this.element.scrollTo = function(y, t) {
     t = t > 0 ? Math.floor(t / 4) : 40;
     let step = (y - this.scrollTop) / t * 40;
@@ -35,12 +37,27 @@ function Playlist(params) {
 
   // Hash Map
   this.list = new Map();
+  this.orderedList = null;
   return this;
 }
 
 Playlist.prototype = {
-  addAll(media) {
-    return Promise.all(media.map(m => this.add(m)));
+  addAll(medias) {
+    return new Promise((resolve, reject) => {
+      let i = 0;
+      let addNextEl = () => {
+        if (++i < medias.length) {
+          this.add(medias[i]).then(v => {
+            addNextEl();
+          });
+        } else {
+          resolve();
+        }
+      };
+      if (medias.length > 0) {
+        this.add(medias[0]).then(addNextEl);
+      }
+    });
   },
 
   /*
@@ -48,7 +65,17 @@ Playlist.prototype = {
     @param File media: The file to add
   */
   add(media) {
+    if (media === null) {
+      return;
+    }
+    this.element.classList.add("loading");
     if (this.list.has(createHash(media))) {
+      this.element.classList.remove("loading");
+      return Promise.resolve();
+    }
+    if (media.type.match("audio") != "audio" &&
+        media.type.match("video") != "video") {
+      this.element.classList.remove("loading");
       return Promise.resolve();
     }
     let adding = new PlaylistItem({
@@ -61,49 +88,54 @@ Playlist.prototype = {
       if (!this.selectedItem) {
         this.onItemSelected(item.hash);
       }
+      this.element.classList.remove("loading");
       return item;
     });
   },
-
-  selectPrevious() {
-    if (this.shuffle && this.previousItem
-        && this.list.has(this.previousItem)
-        && this.previousItem != this.selectedItem) {
-      this.list.get(this.selectedItem).unselect();
-      this.onItemSelected(this.previousItem);
-    } else if (this.shuffle && this.previousItem == this.selectedItem) {
-      this.selectNext();
+  toggleShuffle() {
+    this.shuffle = !this.shuffle;
+    if (this.shuffle) {
+      this.orderedList = this.list;
+      var array = [];
+      this.list.forEach(function(v, i) {
+        array.push([i, v]);
+      });
+      for (var _i = array.length - 1; _i + 1 > 0; _i--) {
+        var _a = array[_i];
+        var _rand = Math.floor(Math.random() * _i);
+        array[_i] = array[_rand];
+        array[_rand] = _a;
+      }
+      this.list = new Map(array);
     } else {
-      var itemIndex = [...this.list.keys()].findIndex(h => h === this.selectedItem);
-      var nextItemIndex = itemIndex === 0 ? this.list.size - 1 : itemIndex - 1;
-      var nextItem = [...this.list.keys()][nextItemIndex];
-      this.list.get(this.selectedItem).unselect();
-      this.onItemSelected(nextItem);
+      this.list = this.orderedList;
+      this.orderedList = null;
+    }
+  },
+  selectPrevious() {
+    var itemIndex = [...this.list.keys()].findIndex(h => h === this.selectedItem);
+    var nextItemIndex = itemIndex === 0 ? this.list.size - 1 : itemIndex - 1;
+    var nextItem = [...this.list.keys()][nextItemIndex];
+    this.list.get(this.selectedItem).unselect();
+    this.onItemSelected(nextItem);
+    if (nextItemIndex === this.list.size - 1 && this.shuffle) {
+      this.shuffle = false;
+      this.toggleShuffle();
     }
   },
 
   selectNext(hash) {
-    if (!hash) {
-      hash = this.selectedItem;
-    }
-    var nextItemIndex;
+    hash = !hash ? this.selectedItem : hash;
     var itemIndex = [...this.list.keys()].findIndex(h => h === hash);
-
-    var oth = [...Array(this.list.size).keys()].filter(i => i != itemIndex);
-    if (this.list.size > 2 && this.previousItem && this.list.has(this.previousItem)) {
-      var previousItemIndex = [...this.list.keys()].findIndex(h => h === this.previousItem);
-      oth = oth.filter(i => i != previousItemIndex);
-    }
-    if (this.shuffle && this.list.size > 1) {
-      nextItemIndex = oth[Math.floor(Math.random() * oth.length)];
-    } else {
-      nextItemIndex = itemIndex === this.list.size - 1 ? 0 : itemIndex + 1;
-    }
-
+    var nextItemIndex = itemIndex === this.list.size - 1 ? 0 : itemIndex + 1;
     var nextItem = [...this.list.keys()][nextItemIndex];
     this.previousItem = hash;
     this.list.get(hash).unselect();
     this.onItemSelected(nextItem);
+    if (nextItemIndex === 0 && this.shuffle) {
+      this.shuffle = false;
+      this.toggleShuffle();
+    }
   },
 
   onItemSelected(hash) {
@@ -139,9 +171,10 @@ function PlaylistItem(params) {
   this.type = params.type;
   this.onItemSelected = params.playlist.onItemSelected;
   this.onItemRemoved = params.playlist.onItemRemoved;
-  return Utils.readID3Data(this.media).then(tags => {
+  this.pic = null;
+  return Utils.readTags(this.media).then(tags => {
     this.tags = tags;
-
+    this.pic = tags.pic;
     this.createDOM();
 
     return this;
@@ -159,6 +192,12 @@ PlaylistItem.prototype = {
     var itemWrap = Element("a", {
       href: "#",
       parent: item
+    });
+
+    /* var coverDiv = */
+    Element("div", {
+      class: "cover",
+      parent: itemWrap
     });
 
     var textContainer = Element("p", {
@@ -195,14 +234,18 @@ PlaylistItem.prototype = {
 
   select() {
     this.element.classList.add("playing");
+    this.playlist.coverEl.src = this.pic == null ? "" : this.pic;
   },
 
   unselect() {
     this.element.classList.remove("playing");
+    this.playlist.coverEl.src = "";
   },
 
   destroy() {
     this.element.remove();
+    this.media = null;
+    this.playlist.coverEl.src = "";
   }
 };
 

@@ -7,7 +7,9 @@ module.exports = {
     Element: true,
     SettingsOverlay: true,
     SettingsStore: true,
-    Utils: true
+    Utils: true,
+    Equalizer: true,
+    musicmetadata: true
   },
   env: {
     es6: true,

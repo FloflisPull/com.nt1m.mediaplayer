@@ -1,6 +1,7 @@
 "use strict";
 
 const {webFrame, remote, ipcRenderer} = require("electron");
+const fs = require("fs");
 let MimeTypeUtils = require("mime-types");
 module.exports = {
   init() {
@@ -13,23 +14,22 @@ module.exports = {
       this.initWindowControls();
     }
 
-    ipcRenderer.on("file-found", (event, file, name) => {
-      try {
-        let type = MimeTypeUtils.lookup(name);
-        console.log(type, file, name);
-        if (!type) {
-          return;
-        }
+    ipcRenderer.on("request-video-action", this.handleVideoAction);
+    ipcRenderer.on("file-found", (event, path) => {
+      MediaPlayer.playlist.element.classList.add("loading");
 
-        let arraybuffer = Uint8Array.from(file).buffer;
-        let blob = new Blob([arraybuffer], {type});
-        blob.name = name;
-        MediaPlayer.playlist.add(blob);
-      } catch (e) {
-        console.error("Couldn't read file" + e);
-        alert("Could not read audio/video file");
-      }
+      this.handleFileFound(path).then(() => {
+        MediaPlayer.playlist.element.classList.remove("loading");
+      }).catch((e) => {
+        console.error("FS handler - Failed to load media:" + e);
+        MediaPlayer.playlist.element.classList.remove("loading");
+      });
     });
+
+    MediaPlayer.videoEl.addEventListener("playing", this.notifyVideoStateChange);
+    MediaPlayer.videoEl.addEventListener("pause", this.notifyVideoStateChange);
+    MediaPlayer.videoEl.addEventListener("ended", this.notifyVideoStateChange);
+    MediaPlayer.videoEl.addEventListener("emptied", this.notifyVideoStateChange);
 
     // Debug
     document.addEventListener("keydown", function(e) {
@@ -83,5 +83,67 @@ module.exports = {
     focusedWindow.on("maximize", () => {
       maximizeBtn.className = "caption-button restore";
     });
+  },
+
+  handleVideoAction(event, action) {
+    switch (action) {
+      case "play":
+        MediaPlayer.videoEl.play();
+        break;
+      case "pause":
+        MediaPlayer.videoEl.pause();
+        break;
+      case "previous-song":
+        MediaPlayer.killContext();
+        MediaPlayer.playlist.selectPrevious();
+        break;
+      case "next-song":
+        MediaPlayer.killContext();
+        MediaPlayer.playlist.selectNext();
+        break;
+    }
+  },
+
+  handleFileFound(path) {
+    return new Promise((resolve, reject) => {
+      fs.readFile(path, null, (err, file) => {
+        if (err) {
+          return reject(err);
+        }
+        try {
+          let name = this.getFileNameFromPath(path);
+          let type = MimeTypeUtils.lookup(name);
+          if (!type) {
+            return reject("No type");
+          }
+          let blob = new Blob([file.buffer], {type});
+          blob.name = name;
+          ipcRenderer.send("add-recent-file", path);
+          return MediaPlayer.playlist.add(blob);
+        } catch (e) {
+          reject(e);
+          alert("Could not read audio/video file");
+        }
+        return reject("Unknown error");
+      });
+    });
+  },
+
+  notifyVideoStateChange() {
+    if (MediaPlayer.videoEl.ended || isNaN(MediaPlayer.videoEl.duration)) {
+      ipcRenderer.send("media-state-change", "ended");
+    } else if (MediaPlayer.videoEl.paused) {
+      ipcRenderer.send("media-state-change", "pause");
+    } else {
+      ipcRenderer.send("media-state-change", "play");
+    }
+  },
+
+  getFileNameFromPath(filePath) {
+    let fileName = filePath.split("/").pop();
+    if (fileName == filePath) {
+      fileName = filePath.split("\\").pop();
+    }
+    return fileName;
   }
 };
