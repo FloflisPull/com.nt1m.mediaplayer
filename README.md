@@ -5,8 +5,8 @@ To try this project, go to: http://nt1m.github.io/media-player
 Optimized for Firefox and Chrome.
 
 ## Authors
-- Maintainers: Mohamed Hadjoudj (@MohIceAge), Tim Nguyen (@nt1m)
-- Contributors: Daniell Mesquita (@danimesq)
+- Maintainers: Mohamed Hadjoudj (@baloone), Tim Nguyen (@nt1m)
+- Contributors: Daniella Mesquita (@danimesq)
 
 ## Resources
 - Audio visualizer (modified): [HTML5 Audio Visualizer](https://github.com/Wayou/HTML5_Audio_Visualizer)
