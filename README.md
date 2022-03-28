@@ -6,7 +6,7 @@ Optimized for Firefox and Chrome.
 
 ## Authors
 - Maintainers: Mohamed Hadjoudj (@MohIceAge), Tim Nguyen (@nt1m)
-- Contributors: Daniell Mesquita (@Plasmmer)
+- Contributors: Daniell Mesquita (@danimesq)
 
 ## Resources
 - Audio visualizer (modified): [HTML5 Audio Visualizer](https://github.com/Wayou/HTML5_Audio_Visualizer)
