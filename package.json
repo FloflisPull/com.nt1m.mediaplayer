@@ -35,8 +35,8 @@
   },
   "homepage": "https://github.com/nt1m/media-player#readme",
   "devDependencies": {
-    "electron": "^1.6.2",
-    "electron-packager": "^8.6.0",
+    "electron": "^22.0.0",
+    "electron-packager": "^17.1.0",
     "electron-winstaller": "^2.5.2",
     "id3js": "^1.1.3"
   },

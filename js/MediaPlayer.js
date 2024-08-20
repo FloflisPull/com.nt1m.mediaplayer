@@ -193,7 +193,6 @@ var MediaPlayer = {
 
     this.UIEnabled = false;
     this.changeLoopState(1);
-    this.initAudioContext();
   },
   set UIEnabled(value) {
     if (!value) {
@@ -236,35 +235,36 @@ var MediaPlayer = {
 
   /** Sidebar **/
   uploadFiles(uploadedMedia) {
+    if (!this.ctx) this.initAudioContext();
     uploadedMedia = Array.from(uploadedMedia) || [];
 
     return this.playlist.addAll(uploadedMedia);
   },
-  setMedia(hash) {
-    let item = this.playlist.list.get(hash);
+  setMedia(item) {
     document.querySelector("#display-container")
       .className = item.type;
     this.videoEl.hidden = item.type != "video";
     this.canvasEl.hidden = item.type == "video";
     URL.revokeObjectURL(this.videoEl.src);
     this.videoEl.src = URL.createObjectURL(item.media);
-    this.updateHeader(item.tags);
+    this.updateHeader(item.tag);
     // Scroll to the selected item
     this.playlist.element.scrollTo(item.element.offsetTop, 1000);
     this.UIEnabled = true;
     this.play(true);
   },
-  updateHeader(tags) {
-    let artistAndTitle = tags.artist ? tags.artist + " - " + tags.title
-      : tags.title;
+  updateHeader(tag) {
+    let artistAndTitle = tag.artist ? tag.artist + " - " + tag.title
+      : tag.title;
     this.headerEl.textContent = artistAndTitle;
     document.title = this.headerEl.textContent;
 
-    this.headerEl.title = Utils.getTooltipForTags(tags);
+    this.headerEl.title = Utils.getTooltipForTag(tag);
   },
 
   /** Audio controls **/
   initAudioContext() {
+    var AudioContext = window.AudioContext || window.webkitAudioContext;
     var ctx = new AudioContext();
     var media = this.videoEl;
     var mediaSrc = ctx.createMediaElementSource(media);
